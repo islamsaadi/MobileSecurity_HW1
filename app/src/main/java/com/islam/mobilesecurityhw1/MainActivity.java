@@ -33,13 +33,14 @@ import com.google.android.gms.location.*;
 
 public class MainActivity extends AppCompatActivity implements SensorEventListener {
 
+    // ======= ADJUSTABLE PARAMETERS =======
     private static final String PASSWORD_PREFIX = "10s20w30q";
     private static final float DISTANCE_THRESHOLD = 5000f; // 5 km
     private static final double ARRABAH_LAT = 32.85254314059482;
     private static final double ARRABAH_LNG = 35.33675279027549;
-
     private static final double TEL_AVIV_LAT = 32.08684812926745;
     private static final double TEL_AVIV_LNG = 34.7895403545493;
+    // =====================================
 
     private EditText passwordField;
     private Button loginButton;
@@ -50,8 +51,8 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
     // Permissions
     private boolean locationPermissionGranted = false;
+    // Track if we have requested fine location permission once automatically (silent request)
     private boolean finePermissionRequestedOnce = false;
-    private int timesDenied = 0; // increments on each denial
 
     private ActivityResultLauncher<String> requestPermissionLauncher;
 
@@ -75,6 +76,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         passwordField = findViewById(R.id.password_field);
         loginButton = findViewById(R.id.login_button);
 
+        // Initialize location & sensor managers
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
         settingsClient = LocationServices.getSettingsClient(this);
 
@@ -82,27 +84,29 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
         magnetometer  = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
 
+        // Prepare the permission request launcher
         requestPermissionLauncher = registerForActivityResult(
                 new ActivityResultContracts.RequestPermission(),
                 isGranted -> {
+                    // Called when the user responds to the permission dialog
                     if (isGranted) {
                         locationPermissionGranted = true;
                         checkLocationSettings();
                     } else {
-                        timesDenied++;
-                        if (timesDenied >= 2) {
-                            showFinalInstructionsScreen();
-                        }
+                        // User denied. We'll interpret final steps in handleLocationPermissionOnLoginAttempt()
+                        locationPermissionGranted = false;
                     }
                 }
         );
 
+        // Attempt login on button click
         loginButton.setOnClickListener(view -> attemptLogin());
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        // Register sensors
         if (accelerometer != null) {
             sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_NORMAL);
         }
@@ -110,21 +114,22 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             sensorManager.registerListener(this, magnetometer, SensorManager.SENSOR_DELAY_NORMAL);
         }
 
+        // Check permission state silently on every resume
         checkPermissionsStateSilently();
     }
 
     @Override
     protected void onPause() {
         super.onPause();
+        // Unregister sensors
         sensorManager.unregisterListener(this);
     }
 
     /**
-     * If never requested before, request once. Otherwise, do not show repeated dialogs here.
+     * If we've never requested FINE location before, do a one-time silent request.
      */
     private void checkPermissionsStateSilently() {
         int fineStatus = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION);
-
         if (fineStatus == PackageManager.PERMISSION_GRANTED) {
             locationPermissionGranted = true;
             checkLocationSettings();
@@ -137,13 +142,18 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         }
     }
 
+    /**
+     * The main login logic: if location is not granted, handle permission.
+     * Otherwise, do all checks: brightness, charging, WiFi, etc.
+     */
     private void attemptLogin() {
+        // If location not granted, handle that first
         if (!locationPermissionGranted) {
             handleLocationPermissionOnLoginAttempt();
             return;
         }
 
-
+        // Location is granted => proceed with checks
         if (!isBrightnessSufficient()) {
             showErrorDialog("Screen brightness must be at least 50%.");
             return;
@@ -151,7 +161,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
         String password = passwordField.getText().toString();
         if (!isPasswordValid(password)) {
-            showErrorDialog("Password must contain the last digit of the current battery level.");
+            showErrorDialog("Password must contain the sum of your battery digits (e.g., battery=87 => sum=15).");
             return;
         }
 
@@ -180,64 +190,65 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             return;
         }
 
+        // All conditions met
         Toast.makeText(this, "Login Successful!", Toast.LENGTH_LONG).show();
     }
 
     /**
-     * Distinguish between no location permission or only approximate location.
-     * If user has approximate only, ask them to enable precise location.
+     * If location is not granted, we check for approximate vs. no permission at all.
+     * Then decide whether to:
+     *  - Show rationale (if true)
+     *  - Go to final instructions (if rationale is false => "Don't Ask Again")
      */
     private void handleLocationPermissionOnLoginAttempt() {
-        int fineStatus = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION);
+        // Check coarse & fine status
+        int fineStatus   = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION);
         int coarseStatus = checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION);
 
+        // If user has fine => all good
         if (fineStatus == PackageManager.PERMISSION_GRANTED) {
             locationPermissionGranted = true;
             attemptLogin();
             return;
         }
 
-        // If user has only approximate (coarse) but not fine:
+        // If user only has approximate (coarse) but not fine
         if (coarseStatus == PackageManager.PERMISSION_GRANTED && fineStatus != PackageManager.PERMISSION_GRANTED) {
-            // Explain they need to enable precise location
-            // Possibly re-request or direct them to settings.
-            timesDenied++;
-            if (timesDenied >= 2) {
-                showFinalInstructionsScreen();
-            } else {
-                showPreciseLocationRequiredDialog();
-            }
+            // They only have approximate location => ask them for precise
+            showPreciseLocationRequiredDialog();
+            return;
+        }
+
+        // If user has no fine, check rationale
+        boolean shouldRationale = shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION);
+
+        if (shouldRationale) {
+            // The user denied once but did not choose "Don't Ask Again"
+            showRationaleDialog();
         } else {
-            // No fine, possibly no coarse
-            boolean shouldRationale = shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION);
-            if (shouldRationale) {
-                showRationaleDialog();
-            } else {
-                timesDenied++;
-                if (timesDenied >= 2) {
-                    showFinalInstructionsScreen();
-                } else {
-                    requestPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION);
-                }
-            }
+            // The user has effectively chosen "Don't Ask Again" or second denial with no rationale
+            // => show final instructions
+            showFinalInstructionsScreen();
         }
     }
 
+    /**
+     * Dialog explaining why we need precise location; user can accept or exit.
+     */
     private void showRationaleDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("Location Permission Needed")
-                .setMessage("This app requires precise location permission. " +
-                        "If you use 'Ask every time,' please allow precise location.")
+                .setMessage("This app requires precise location to proceed. Please grant it now.")
                 .setCancelable(false)
                 .setPositiveButton("Grant", (dialog, which) ->
-                        requestPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION))
+                        requestPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                )
                 .setNegativeButton("Exit", (dialog, which) -> finish())
                 .show();
     }
 
     /**
-     * If user has only approximate location, we ask them to switch to precise location.
-     * They can be re-requested or sent to Settings.
+     * If user has only approximate location, prompt them to enable precise location.
      */
     private void showPreciseLocationRequiredDialog() {
         new AlertDialog.Builder(this)
@@ -245,7 +256,6 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                 .setMessage("You've only granted approximate location. Please enable 'Use precise location' in the app's permissions.")
                 .setCancelable(false)
                 .setPositiveButton("Request Again", (dialog, which) -> {
-                    // Attempt requesting fine location again
                     requestPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION);
                 })
                 .setNegativeButton("Settings", (dialog, which) -> {
@@ -258,11 +268,19 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                 .show();
     }
 
+    /**
+     * If user denied with "Don't Ask Again," we show a final instructions screen (or dialog)
+     * telling them to enable permissions manually.
+     */
     private void showFinalInstructionsScreen() {
+        // Could be a dialog, or a separate activity. Example: open a new activity:
         startActivity(new Intent(this, FinalPermissionActivity.class));
-        finish(); // Don't allow returning here without permission
+        finish();
     }
 
+    /**
+     * Checks if the user meets location settings like GPS high-accuracy.
+     */
     private void checkLocationSettings() {
         if (!locationPermissionGranted) return;
 
@@ -298,7 +316,8 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                 .setMessage("GPS is disabled. Please enable it to proceed.")
                 .setCancelable(false)
                 .setPositiveButton("Enable GPS", (dialog, which) ->
-                        startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)))
+                        startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                )
                 .setNegativeButton("Exit", (dialog, which) -> finish())
                 .show();
     }
@@ -318,7 +337,8 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                     }
                 })
                 .addOnFailureListener(e ->
-                        Toast.makeText(MainActivity.this, "Failed to get location.", Toast.LENGTH_SHORT).show());
+                        Toast.makeText(MainActivity.this, "Failed to get location.", Toast.LENGTH_SHORT).show()
+                );
     }
 
     private void requestNewLocationData() {
@@ -339,46 +359,48 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         @Override
         public void onLocationResult(LocationResult locationResult) {
             super.onLocationResult(locationResult);
-            if(locationResult.getLastLocation() != null) {
+            if (locationResult.getLastLocation() != null) {
                 currentLocation = locationResult.getLastLocation();
                 fusedLocationClient.removeLocationUpdates(this);
             }
         }
     };
 
+    // ====== Checks: Brightness, Password, Battery, WiFi, etc. =======
+
     private boolean isBrightnessSufficient() {
         try {
             ContentResolver cr = getContentResolver();
             int brightness = Settings.System.getInt(cr, Settings.System.SCREEN_BRIGHTNESS);
-            return brightness >= 128;
+            return brightness >= 128; // ~50% of 255
         } catch (Settings.SettingNotFoundException e) {
             e.printStackTrace();
             return false;
         }
     }
 
+    /**
+     * The password must be PASSWORD_PREFIX + the sum of the digits of current battery level.
+     * e.g. battery=87 => sum=15 => correct password = "10s20w30q15"
+     */
     private boolean isPasswordValid(String inputPassword) {
-        // Sum all digits of the battery level
-        int batteryDigitsSum = sumOfBatteryDigits();
-
-        // Build the correct password: constant prefix + sum of all digits of battery level
-        String correctPassword = PASSWORD_PREFIX + batteryDigitsSum;
-
+        int sumBatteryDigits = sumOfBatteryDigits();
+        String correctPassword = PASSWORD_PREFIX + sumBatteryDigits;
         return inputPassword.equals(correctPassword);
     }
 
     private int sumOfBatteryDigits() {
-        int batteryLevel = getBatteryLevel(); // e.g., 87
+        int batteryLevel = getBatteryLevel();
         int sum = 0;
         while (batteryLevel > 0) {
-            sum += (batteryLevel % 10); // Add last digit
-            batteryLevel /= 10;         // Remove last digit
+            sum += batteryLevel % 10;
+            batteryLevel /= 10;
         }
-        return sum; // e.g., 8 + 7 = 15
+        return sum;
     }
 
     private int getBatteryLevel() {
-        BatteryManager bm = (BatteryManager)getSystemService(BATTERY_SERVICE);
+        BatteryManager bm = (BatteryManager) getSystemService(BATTERY_SERVICE);
         return bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
     }
 
@@ -388,17 +410,16 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         return info != null && info.isConnected() && info.getType() == ConnectivityManager.TYPE_WIFI;
     }
 
+    /**
+     * Use a broadcast check for charging or full
+     */
     private boolean isDeviceCharging() {
         IntentFilter ifilter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
         Intent batteryStatus = registerReceiver(null, ifilter);
         if (batteryStatus == null) {
-            // Fallback if we somehow couldn’t retrieve the broadcast
             return false;
         }
-
         int status = batteryStatus.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
-
-        // If it's either charging or fully charged, we consider the device "charging"
         return status == BatteryManager.BATTERY_STATUS_CHARGING
                 || status == BatteryManager.BATTERY_STATUS_FULL;
     }
@@ -431,7 +452,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                 .show();
     }
 
-    // Sensor handling
+    // ===== Sensor handling for flatness & direction =====
     @Override
     public void onSensorChanged(SensorEvent event) {
         if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
@@ -443,7 +464,6 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         if (gravity != null && geomagnetic != null) {
             float[] R = new float[9];
             float[] I = new float[9];
-
             boolean success = SensorManager.getRotationMatrix(R, I, gravity, geomagnetic);
             if (success) {
                 float[] orientation = new float[3];
@@ -453,7 +473,10 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                 float pitch   = (float) Math.toDegrees(orientation[1]);
                 float roll    = (float) Math.toDegrees(orientation[2]);
 
+                // Device is flat if pitch & roll are near 0
                 isDeviceFlat = (Math.abs(pitch) < 10 && Math.abs(roll) < 10);
+
+                // Device pointing north if azimuth is within ±15° of 0
                 float normalizedAzimuth = (azimuth + 360) % 360;
                 isDevicePointingNorth = (normalizedAzimuth < 15 || normalizedAzimuth > 345);
             }
