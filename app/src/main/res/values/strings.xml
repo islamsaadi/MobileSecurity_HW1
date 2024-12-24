@@ -1,0 +1,30 @@
+<resources>
+    <string name="app_name">MobileSecurityHw1</string>
+    <string name="enter_password">Enter Password</string>
+    <string name="login">Login</string>
+    <string name="waiting_for_input">Waiting for input...</string>
+    <string name="permission_dialog_title">Location Permission Required</string>
+    <string name="permission_dialog_message">This app requires location permission to verify your proximity to specific locations. Please grant the permission for full functionality.</string>
+    <string name="permission_dialog_allow">Allow</string>
+    <string name="permission_dialog_cancel">Cancel</string>
+    <string name="settings_dialog_title">Permission Needed</string>
+    <string name="settings_dialog_message">This app needs location permission to function. Please enable it from App Settings.</string>
+    <string name="settings_dialog_positive">Open Settings</string>
+    <string name="settings_dialog_negative">Cancel</string>
+    <string name="conditions_not_met">❌ Conditions Not Met:</string>
+    <string name="condition_brightness">Brightness: %1$s</string>
+    <string name="condition_battery">Battery: %1$s</string>
+    <string name="condition_wifi">WiFi: %1$s</string>
+    <string name="condition_charging">Charging: %1$s</string>
+    <string name="condition_location">Location: %1$s</string>
+    <string name="condition_flat">Device Flat: %1$s</string>
+    <string name="condition_compass">Compass: %1$s</string>
+    <string name="condition_met">✔</string>
+    <string name="condition_not_met">✖</string>
+    <string name="all_conditions_met">✅ All Conditions Met. Login Successful!</string>
+    <string name="permission_granted">Permission Granted</string>
+    <string name="permission_denied">Permission Denied</string>
+    <string name="open_settings">Open Settings</string>
+    <string name="exit">Exit</string>
+    <string name="instructions">Instructions</string>
+</resources>
